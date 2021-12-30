@@ -1,0 +1,100 @@
+parameters:
+  - name: deployVarGroup
+    type: string
+    default: ""
+
+jobs:
+  - job: Build
+
+    variables:
+      - group: ${{ parameters.deployVarGroup }}
+
+    steps:
+      - checkout: self
+        persistCredentials: true
+
+      - bash: |
+          git config --global user.email "ado.build@oneamerica.com"
+          git config --global user.name "ADO Build"
+        displayName: "Set git identity"
+
+            
+      - task: SonarCloudPrepare@1
+        inputs:
+          SonarCloud: 'SonarCloud'
+          organization: 'oneamerica'
+          scannerMode: 'CLI'
+          configMode: 'manual'
+          cliProjectKey: 'oneamerica_ml-datahub-pipeline'
+          cliProjectName: 'ml-datahub-pipeline2'
+          cliSources: 'dhf/, utilities/dhfTesting, utilities/dmsdk, utilities/mlcp'
+          extraProperties: |
+            sonar.verbose=false
+            sonar.java.binaries=utilities/dmsdk/build/classes/java/main/*
+            sonar.java.test.binaries=utilities/dmsdk/build/classes/java/test/*
+
+
+      - task: Gradle@2
+        displayName: DHF Build
+        inputs:
+          workingDirectory: 'dhf'
+          gradleWrapperFile: 'dhf/gradlew'
+          gradleOptions: '-Xmx3072m'
+          tasks: ':dhf:mlReloadSchemas hubDeploy mlUnitTest'
+          options: '-i -PenvironmentName=dev -PmlUsername=$(DHF_API_USER) -PmlPassword=$(DHF_API_PW) --no-daemon'
+          javaHomeOption: 'JDKVersion'
+          jdkVersionOption: '1.8'
+          jdkArchitectureOption: 'x64'
+          publishJUnitResults: true
+          testResultsFiles: '**\build\test-results\marklogic-unit-test\TEST-*.xml, **\utilities\dhfTesting\test-results\*.xml'
+          testRunTitle: 'ML-Unit Test'
+
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '12.14.0' 
+
+      - task: Npm@1
+        displayName: 'npm ci'
+        inputs:
+          command: 'custom' # Options: install, publish, custom
+          workingDir: utilities/dhfTesting
+          verbose: true
+          customCommand: ci # Required when command == Custom
+          customRegistry: 'useFeed' # Optional. Options: useNpmrc, useFeed
+          customFeed: 'oneamerica' # Required when customRegistry == UseFeed
+                  
+      - script: |
+          cd utilities/dhfTesting
+          npm run test
+        displayName: 'npm test'
+        env: 
+          DHF_API_PW: $(DHF_API_PW)
+
+      - task: Gradle@2
+        displayName: DMSDK Build
+        inputs:
+          workingDirectory: 'utilities/dmsdk'
+          gradleWrapperFile: 'utilities/dmsdk/gradlew'
+          gradleOptions: '-Xmx3072m'
+          tasks: 'clean dependencies check build'
+          options: '-i'
+          javaHomeOption: 'JDKVersion'
+          jdkVersionOption: '1.8'
+          jdkArchitectureOption: 'x64'
+          publishJUnitResults: true
+          testResultsFiles: '**/utilities/dmsdk/build/test-results/test/*.xml'
+          testRunTitle: 'DMSDK Unit Test'
+
+      - task: JavaToolInstaller@0
+        inputs:
+          versionSpec: "11"
+          jdkArchitectureOption: "x64"
+          jdkSourceOption: "PreInstalled"
+            
+      - task: SonarCloudAnalyze@1
+
+      - task: SonarCloudPublish@1
+        inputs:
+          pollingTimeoutSec: '300'
+
+      

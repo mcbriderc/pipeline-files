@@ -1,0 +1,21 @@
+trigger: 
+  batch: false
+  branches:
+    include:
+    - task/*
+    - feature/*
+
+variables:
+  runBuild: true
+  # runSBDeploy: true
+  # runTSTDeploy: false
+
+pool: "default"
+
+stages:
+  - stage: Build
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          deployVarGroup: ml-datahub-dev-vg

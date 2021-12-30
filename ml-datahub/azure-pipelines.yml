@@ -1,0 +1,39 @@
+trigger: 
+  - master
+
+variables:
+   runBuild: true
+
+
+pool: "default"
+
+stages:
+  - stage: Build
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          deployVarGroup: ml-datahub-dev-vg
+
+  - stage: VersionPackage
+    condition: in(stageDependencies.Build.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "lerna.yml"
+          
+  - stage: DeployQA
+    condition: in(stageDependencies.VersionPackage.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "deploy.yml"
+        parameters:
+          deployVarGroup: "ml-datahub-qa-vg"
+          envName: "ml-qa"
+          envTags: "Marklogic"
+
+  - stage: DeployProd
+    condition: in(stageDependencies.DeployQA.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "deploy.yml"
+        parameters:
+          deployVarGroup: "ml-datahub-prod-vg"
+          envName: "ml-prod"
+          envTags: "Marklogic"

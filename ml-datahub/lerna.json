@@ -1,0 +1,18 @@
+{
+  "packages": [
+    "dhf/**",
+    "services/**",
+    "utilities/**",
+    "docs/**"
+  ],
+  "version": "independent",
+  "command": {
+    "publish":{
+      "conventionalCommits": true,
+      "registry": "https://pkgs.dev.azure.com/oneamerica/enterpriseapps/_packaging/ml-datahub-test/npm/registry/"
+    },
+    "version": {
+      "message": "chore(release): release [skip ci]"
+    }
+  }
+}

@@ -1,0 +1,258 @@
+parameters:
+  - name: buildVarGroup
+    type: string
+    default: ""
+
+jobs:
+  - job: AppSecrets
+
+    variables:
+      - group: ${{ parameters.buildVarGroup }}
+    
+    steps:
+      - checkout: self
+        persistCredentials: true
+        clean: false
+
+      - bash: |
+          git config --global user.email "ado.build@oneamerica.com"
+          git config --global user.name "ADO Build"
+        displayName: "Set git identity"
+
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '>= 14.17'
+
+      - task: Npm@1
+        displayName: Install Semantic Release
+        inputs:
+          command: 'custom' # Options: install, publish, custom
+          customCommand: install --global semantic-release @semantic-release/changelog @semantic-release/git
+          customRegistry: 'useFeed' # Optional. Options: useNpmrc, useFeed
+          customFeed: 'oneamerica' # Required when customRegistry == UseFeed
+                
+      - task: CmdLine@2
+        displayName: Run Semantic Release
+        inputs:
+          env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+          script: 'semantic-release --GIT_CREDENTIALS oneamerica:$(System.AccessToken)'
+                
+      - task: Bash@3
+        displayName: "AppSecrets"
+        inputs:
+          targetType: 'inline' # Optional. Options: filePath, inline
+          script: |
+            #version from git tag (after semantic release runs)
+            git checkout master
+            git pull origin master
+            TAG_VERSION=$(git describe --tags --abbrev=0)
+            # Android
+            APP_CENTER_TRACKING_JSON_FILE_ANDROID=$(Build.SourcesDirectory)/android/app/src/main/assets/appcenter-config.json
+            APP_VERSIONNAME_FILE_ANDROID=$(Build.SourcesDirectory)/android/app/build.gradle
+            #iOS
+            APP_NAME="OneAmerica"
+            APP_CENTER_TRACKING_JSON_FILE_IOS=$(Build.SourcesDirectory)/ios/$APP_NAME/AppCenter-Config.plist
+            APP_VERSIONNAME_FILE_IOS=$(Build.SourcesDirectory)/ios/OneAmerica.xcodeproj/project.pbxproj
+            #Replace Placeholders Android
+            sed -i '.bak' 's/APP_SECRET_PLACEHOLDER/$(ANDROID_APP_SECRET)/g' $APP_CENTER_TRACKING_JSON_FILE_ANDROID
+            sed -i '.bak' "s/SEMANTIC_VERSION/$TAG_VERSION/g" $APP_VERSIONNAME_FILE_ANDROID
+            #Replace Placeholders iOS
+            sed -i '.bak' 's/APP_SECRET_PLACEHOLDER/$(IOS_APP_SECRET)/g' $APP_CENTER_TRACKING_JSON_FILE_IOS
+            sed -i '.bak' "s/SEMANTIC_VERSION/$TAG_VERSION/g" $APP_VERSIONNAME_FILE_IOS
+            #
+            cat $APP_CENTER_TRACKING_JSON_FILE_ANDROID
+            cat $APP_CENTER_TRACKING_JSON_FILE_IOS
+            cat $APP_VERSIONNAME_FILE_ANDROID
+            cat $APP_VERSIONNAME_FILE_IOS
+           
+  
+  - job: BuildAndroid
+    dependsOn:
+      - AppSecrets
+
+    variables:
+    - group: ${{ parameters.buildVarGroup }}
+
+    steps:
+      - checkout: self
+        persistCredentials: true
+        
+      - task: Bash@3
+        displayName: "Remove yarn.lock"
+        inputs:
+          targetType: 'inline'
+          script: rm -f yarn.lock
+       
+      - task: Bash@3
+        displayName: "check workspace"
+        inputs:
+          targetType: 'inline'
+          script: ls -la
+      
+      - task: Npm@1
+        displayName: 'npm install'
+        inputs:
+          versionSpec: '14.x'
+          command: "install"
+          customRegistry: 'useNpmrc'
+          # customFeed: oneamerica # Required when customRegistry == UseFeed
+
+      - task: Gradle@2
+        displayName: Android Gradle Build
+        inputs:
+          workingDirectory: "android"
+          gradleWrapperFile: "android/gradlew"
+          gradleOptions: "-Xmx3072m"
+          javaHomeOption: "JDKVersion"
+          jdkVersionOption: "1.8"
+          jdkArchitectureOption: "x64"
+          publishJUnitResults: true
+          testResultsFiles: "**/TEST-*.xml"
+          tasks: "clean :app:assembleRelease :app:lintRelease"
+
+      - task: PowerShell@2
+        inputs:
+          targetType: 'inline'
+          script: 'gci -path *.apk -recurse'
+          pwsh: true
+          
+      # Android signing
+      # Sign and align Android APK files
+      - task: AndroidSigning@3
+        inputs:
+          apkFiles: '**/*.apk' 
+          apksign: true
+          apksignerKeystoreFile: azure.keystore 
+          apksignerKeystorePassword: '$(AndroidKeyStorePassword)'
+          apksignerKeystoreAlias: '$(AndroidKeyAlias)'
+          apksignerKeyPassword: '$(AndroidKeyAliasPassword)'
+          apksignerArguments: '--verbose --out $(Build.SourcesDirectory)/android/app/build/outputs/apk/release/app-release.apk'
+          zipalign: true
+          
+      - task: PowerShell@2
+        inputs:
+          targetType: 'inline' 
+          script: 'gci -path *.apk -recurse'
+          pwsh: true
+
+      - task: CopyFiles@2
+        displayName: "Copy APK Files"
+        inputs:
+          contents: '**/*.apk'
+          targetFolder: '$(build.artifactStagingDirectory)/android'
+          flattenFolders: true
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish Android Artifacts"
+        inputs:
+          targetPath: '$(build.artifactStagingDirectory)/android'
+          artifactName: 'Android' 
+          artifactType: 'pipeline' 
+         
+  
+  - job: BuildiOS
+    dependsOn:
+      - AppSecrets
+
+    variables:
+      - group: ${{ parameters.buildVarGroup }}
+    
+    steps:
+
+    - task: Npm@1
+      displayName: 'npm install'
+      inputs:
+        versionSpec: '14.x'
+        command: "install"
+
+    # Install Apple certificate
+    # Install an Apple certificate required to build on a macOS agent machine
+    - task: InstallAppleCertificate@2
+      inputs:
+        certSecureFile: 'RSMA_Certificates_P12.p12'
+        certPwd: '$(AppleCertificatePassword)'
+        keychain: 'temp'
+        
+
+    # Install Apple provisioning profile
+    # Install an Apple provisioning profile required to build on a macOS agent machine
+    - task: InstallAppleProvisioningProfile@1
+      inputs:
+        provisioningProfileLocation: 'secureFiles' 
+        provProfileSecureFile: Internal_Adhoc.mobileprovision 
+        removeProfile: true 
+
+    # CocoaPods
+    # Install CocoaPods dependencies for Swift and Objective-C Cocoa projects
+    - task: CocoaPods@0
+      inputs:
+        workingDirectory: 'ios' 
+        forceRepoUpdate: true
+       
+
+    # Xcode
+    # Build, test, or archive an Xcode workspace on macOS. Optionally package an app.
+    - task: Xcode@5
+      displayName: iOS Xcode Build
+      inputs:
+        actions: 'clean build' 
+        configuration: '$(Configuration)' 
+        sdk: '$(sdk)' 
+        xcWorkspacePath: '**/ios/OneAmerica.xcworkspace' 
+        scheme: OneAmerica 
+        xcodeVersion: '12' 
+        packageApp: true
+        exportPath: 'output/$(sdk)/$(Configuration)' 
+        signingOption: 'manual' 
+        signingIdentity: 'redacted' 
+        provisioningProfileUuid: $(appProvisioningProfileUUID) 
+        publishJUnitResults: true 
+
+    - task: CopyFiles@2
+      displayName: 'Copy IPA'
+      inputs:
+        contents: '**/*.ipa'
+        targetFolder: '$(build.artifactStagingDirectory)/ios'
+        overWrite: true
+        flattenFolders: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish iOS Artifacts"
+      inputs:
+        targetPath: '$(build.artifactStagingDirectory)/ios' 
+        artifactName: 'iOS' 
+        artifactType: 'pipeline' 
+
+
+  - job: SonarScan
+    dependsOn:
+    - AppSecrets
+    - BuildAndroid
+    - BuildiOS
+
+    variables:
+      - group: ${{ parameters.buildVarGroup }}
+    
+    steps:
+
+    - task: SonarCloudPrepare@1
+      inputs:
+        SonarCloud: 'SonarCloud'
+        organization: 'oneamerica'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'oneamerica_rsmobile'
+        cliProjectName: 'rsmobile'
+        cliSources: './src'
+        extraProperties: |
+          sonar.verbose=false
+          sonar.projectVersion=$(Build.BuildId)
+          sonar.javascript.lcov.reportPaths=$(Build.SourcesDirectory)/coverage/lcov.info
+          
+
+    - task: SonarCloudAnalyze@1
+
+    - task: SonarCloudPublish@1
+      inputs:
+        pollingTimeoutSec: '300'

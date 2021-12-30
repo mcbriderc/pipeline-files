@@ -1,0 +1,41 @@
+parameters:
+  - name: distributeVarGroup
+    type: string
+    default: ""
+    
+jobs:
+  - job: Distribute
+
+    variables:
+    - group: ${{ parameters.distributeVarGroup }}
+
+    steps:
+      - checkout: none
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          source: 'current' 
+          path: '$(Build.BinariesDirectory)'
+
+      # App Center distribute
+      # Distribute app builds to testers and users via Visual Studio App Center
+      - task: AppCenterDistribute@3
+        displayName: "Android Distribution"
+        inputs:
+          serverEndpoint: $(AppCenterServiceConn-Android)
+          appSlug: 'oneamerica/AzDO-POC-Android'
+          appFile: '$(Build.BinariesDirectory)/android/app-release.apk'
+          releaseNotesOption: 'input' 
+          releaseNotesInput: $(Build.SourceVersionMessage) 
+
+      # App Center distribute
+      # Distribute app builds to testers and users via Visual Studio App Center
+      - task: AppCenterDistribute@3
+        displayName: "iOS Distribution"
+        inputs:
+          serverEndpoint: $(AppCenterServiceConn-iOS)
+          appSlug: 'oneamerica/AzDO-POC-iOS'
+          appFile: '$(Build.BinariesDirectory)/ios/OneAmerica.ipa'
+          releaseNotesOption: 'input' 
+          releaseNotesInput: $(Build.SourceVersionMessage) 
+          

@@ -1,0 +1,62 @@
+trigger:
+  - master
+
+variables:
+  # - group: ''
+  runBuild: true
+  
+pool:
+  vmImage: "macOS-latest"
+
+# Builds all occur from same commit in each environment
+
+#Dev Environment
+stages:
+  - stage: BuildDev
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          buildVarGroup: "rs-mobile-dev-vg"
+  
+ 
+  - stage: DistributeDev
+    condition: in(stageDependencies.BuildDev.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "distribute.yml"
+        parameters:
+          distributeVarGroup: "rs-mobile-dev-vg"
+
+# Stage Environment          
+
+  - stage: BuildSTG
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          buildVarGroup: "rs-mobile-stg-vg"
+  
+  
+  - stage: DistributeSTG
+    condition: in(stageDependencies.BuildSTG.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "distribute.yml"
+        parameters:
+          distributeVarGroup: "rs-mobile-stg-vg"
+            
+# Production Environment          
+
+  - stage: BuildProd
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          buildVarGroup: "rs-mobile-prod-vg"
+  
+  
+  - stage: DistributeProd
+    condition: in(stageDependencies.BuildProd.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "distribute.yml"
+        parameters:
+          distributeVarGroup: "rs-mobile-prod-vg"

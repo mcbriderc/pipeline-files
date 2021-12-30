@@ -1,0 +1,76 @@
+parameters:
+  - name: envName
+    type: string
+    default: ""
+  - name: envTags
+    type: string
+    default: ""
+  - name: deployVarGroup
+    type: string
+    default: ""
+
+jobs:
+  - job: DeployDHS
+    displayName: "Deploy DHS to ${{ parameters.envName }}"
+
+    variables:
+      - group: ${{ parameters.deployVarGroup }}
+      
+    
+    steps:
+      
+    - task: PowerShell@2
+      inputs:
+        targetType: 'filePath'
+        filePath: $(System.DefaultWorkingDirectory)\ci\installDHSForDeploy.ps1
+        arguments: -input1 '"$(Build.ArtifactStagingDirectory)"'
+      displayName: 'Check for newly published DHF'    
+
+    - task: Gradle@2
+      displayName: "DHF mlReloadSchemas QA"
+      inputs:
+        workingDirectory: '$(Build.ArtifactStagingDirectory)/dhf'
+        gradleWrapperFile: 'gradlew'
+        gradleOptions: '-Xmx3072m'
+        tasks: 'mlReloadSchemas'
+        options: '-i -PenvironmentName=qa -PmlUsername=$(DHF_API_USER) -PmlPassword=$(DHF_API_PW) --no-daemon'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.8'
+        jdkArchitectureOption: 'x64'
+
+    - task: Gradle@2
+      displayName: "DHF hubDeploy QA"
+      inputs:
+        workingDirectory: '$(Build.ArtifactStagingDirectory)/dhf'
+        gradleWrapperFile: 'gradlew'
+        gradleOptions: '-Xmx3072m'
+        tasks: 'hubDeploy'
+        options: '-i -PenvironmentName=qa -PmlUsername=$(DHF_API_USER) -PmlPassword=$(DHF_API_PW) --no-daemon'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.8'
+        jdkArchitectureOption: 'x64'
+          
+      ## run mlcp copies here 
+  - job: CopyToMLCP
+    displayName: Copy to MLCP
+  
+    steps:
+      ## de-identification 
+    - task: PowerShell@2
+      inputs:
+        targetType: 'filePath'
+        filePath: $(System.DefaultWorkingDirectory)\ci\installDedentForDeploy.ps1
+        arguments: -input1 '"$(Build.ArtifactStagingDirectory)"'
+      displayName: 'Check for newly published Deidentification'    
+
+    - task: Gradle@2
+      displayName: "De-ID mlDeploy"
+      inputs:
+        workingDirectory: '$(Build.ArtifactStagingDirectory)/dedent'
+        gradleWrapperFile: 'gradlew'
+        gradleOptions: '-Xmx3072m'
+        tasks: 'mlDeploy'
+        options: '-i -PenvironmentName=deidentify -PmlUsername=$(DHF_API_USER) -PmlPassword=$(DHF_API_PW) --no-daemon'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.8'
+        jdkArchitectureOption: 'x64'      

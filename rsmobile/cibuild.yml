@@ -1,0 +1,30 @@
+trigger:
+  branches:
+    include:
+    - task/*
+    - feature/*
+    - hotfix/*
+
+variables:
+  runBuild: true
+  
+
+pool:
+  vmImage: "macOS-latest"
+
+stages:
+  - stage: CIBuild
+    condition: eq(variables.runBuild, true)
+    jobs:
+      - template: "build.yml"
+        parameters:
+          buildVarGroup: "rs-mobile-dev-vg"
+
+  
+  - stage: Distribute
+    condition: in(stageDependencies.CIBuild.result, 'Succeeded', 'SucceededWithIssues')
+    jobs:
+      - template: "distribute.yml"
+        parameters:
+          distributeVarGroup: "rs-mobile-dev-vg"
+         

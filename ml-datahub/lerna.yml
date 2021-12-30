@@ -1,0 +1,26 @@
+jobs:
+  - job: VersionPackage
+
+    steps:
+      - checkout: self
+        persistCredentials: true
+        clean: true
+
+           
+      - task: Bash@3
+        displayName: Lerna
+        inputs:
+          targetType: 'inline' # Optional. Options: filePath, inline
+          script: |
+            git checkout -- dhf/src/main/entity-config/exp-final-entity-options.xml
+            git checkout -- dhf/src/main/entity-config/exp-staging-entity-options.xml
+            git checkout master
+            git pull
+            $APPDATA/npm/lerna publish --yes --loglevel silly
+
+      
+      - task: PublishPipelineArtifact@1
+        displayName: Publish Changelog
+        inputs:
+          targetPath: $(Pipeline.Workspace)/s/CHANGELOG.MD
+          ArtifactName: "changelog"
